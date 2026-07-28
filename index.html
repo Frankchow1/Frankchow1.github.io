@@ -384,6 +384,7 @@ function containerHTML(){const t=task(S.cur);const B=bz(t);ensureReps(t);const s
   <div class="conh2"><span>${esc(t.proj)}</span><span class="prog" style="margin-left:auto">已完成 ${st.done}/${st.total}</span></div></div>
  ${redo?`<div class="redobanner">⚠︎ 补录模式：仅被驳回采集项可修改，其余只读</div>`:''}
  ${readonly?`<div class="redobanner" style="background:var(--fill);color:var(--sub);border-color:var(--line)">已提交 · 只读查看</div>`:''}
+ ${typeof mcardHTML==="function"?mcardHTML(t):""}
  ${body}
  <div class="botbar">${readonly?`<button class="btn pri" style="flex:1" onclick="exitContainer()">返回</button>`:`<span style="font-size:11.5px;color:#B9B6B1">自动暂存<br>已开启</span><button class="btn pri ${redo?'red':''}" onclick="trySubmit()">${redo?'重新提交（仅补驳回项）':'提交'}</button>`}</div></div>`}
 function exitContainer(){const t=task(S.cur);if(t.status==='review'){S.screen='detail'}else{S.screen='home';S.tab='doing'}save();render()}
@@ -451,7 +452,7 @@ function trySubmit(){const t=task(S.cur);if(t.quota&&S.quotaFull){openSheet(`<di
 function doSubmit(){closeSheet();const t=task(S.cur);
  const up=document.createElement('div');up.className='uploading';up.innerHTML=`<div style="font-size:15px;font-weight:700">正在统一上传采集包…</div><div class="pbar"><i id="pb"></i></div><div style="font-size:12px;color:var(--sub)">弱网可续传 · demo 模拟</div>`;document.body.appendChild(up);
  let p=0;const h=setInterval(()=>{p+=25;$('pb').style.width=p+'%';if(p>=100){clearInterval(h);setTimeout(()=>{up.remove();
-  const redo=t.sub==='待补录';t.status='review';t.sub='待审核';if(redo)t.rej=[];else S.subCnt=(S.subCnt||0)+1;comm(t,redo?'补录重新提交成功':'提交成功 · 进入审核');
+  const redo=t.sub==='待补录';t.status='review';t.sub='待审核';if(redo)t.rej=[];else{S.subCnt=(S.subCnt||0)+1;S.subBiz=S.subBiz||{};S.subBiz[t.biz]=(S.subBiz[t.biz]||0)+1}comm(t,redo?'补录重新提交成功':'提交成功 · 进入审核');
   S.screen='home';S.tab='review';save();render();toast(redo?'补录已重新提交 → 待审核':'提交成功 → 审核中（完成口径=提交）')},250)}},220)}
 
 /* ═════ 调试面板：模拟后台事件 ═════ */
@@ -592,6 +593,359 @@ function openStats(){const doing=S.tasks.filter(t=>t.status==='doing').length,re
  <div class="statcell">待接 · 新任务<b>${nw}</b></div>
  <div class="statcell">一次通过率<b>${(S.subCnt||0)+(S.passCnt||0)?'87%':'—'}</b></div></div>
  <div style="font-size:11.5px;color:#B9B6B1;line-height:1.6">demo 口径：完成 = 提交成功；驳回重交不重复计数。完整版含日/周/月趋势与项目维度。</div>`)}
+render();
+</script>
+<style>
+/* ══ P2：商户业务线 + 详情双 Tab + 商户信息核对卡 + 快照 ══ */
+.tag.mchi,.tag.mchx{background:#F3EDE6;color:#7A5C3E}
+.dettabs{display:flex;gap:8px;padding:10px 12px 2px}
+.dtab{flex:1;height:36px;border-radius:9px;border:1px solid var(--line);background:#fff;font-size:13.5px;font-weight:600;color:var(--sub)}
+.dtab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.snapthumb{display:inline-flex;width:56px;height:42px;border-radius:8px;background:linear-gradient(135deg,#D8CFC2,#B8A890);align-items:center;justify-content:center;font-size:18px}
+.mcard{margin:10px 12px 0;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12.5px;flex:none}
+.mcard .mr1{display:flex;align-items:center;gap:8px}
+.mcard .mr1 b{font-size:13px}
+.mlink{border:none;background:none;color:var(--blue);font-size:12px;font-weight:600;padding:0}
+.mcard .mtop{margin-left:auto;color:var(--sub);font-size:11px;white-space:nowrap}
+.mcard .mr2{display:flex;align-items:center;gap:6px;margin-top:6px;color:var(--sub)}
+.mtag{font-size:10.5px;padding:1px 6px;border-radius:6px;background:#FBF3E9;color:#B07C2A;font-weight:700;white-space:nowrap}
+.mtag.ok{background:#EBF6EE;color:var(--green)}
+.mblk{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+.mblk .bt{font-size:12px;font-weight:700;margin-bottom:6px}
+.histtag{font-size:10.5px;color:#B07C2A;background:#FBF3E9;border-radius:6px;padding:1px 6px;margin-left:6px;font-weight:600}
+.locbox{display:flex;align-items:center;gap:8px;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:var(--sub)}
+.locbox .mlink{margin-left:auto}
+.mbtns{display:flex;gap:10px;margin-top:12px}
+</style>
+<script>
+/* ═════ 商户业务线配置（装机=需预约 / 巡检=无预约） ═════ */
+BIZ.nonfin.nodes=['启动任务','信息采集','审核'];
+BIZ.mchi={name:'商户服务',color:'#7A5C3E',mode:'sliding',needAppt:true,nodes:['启动任务','上门预约','上门采集','审核'],groups:[{id:'mg1',name:'装机核验',items:[
+ {id:'m1',name:'门头照',type:'photo',req:true,max:3,desc:'正对门头，含完整招牌'},
+ {id:'m2',name:'机具安装位置照',type:'photo',req:true,max:3,desc:'含收银台环境与机具摆放'},
+ {id:'m3',name:'POS 开机画面照',type:'photo',req:false,max:1},
+ {id:'m4',name:'联机测试是否通过',type:'radio',req:true,options:['通过','未通过']},
+ {id:'m5',name:'装机备注',type:'text',req:false}]}]};
+BIZ.mchx={name:'商户服务',color:'#7A5C3E',mode:'sliding',needAppt:false,nodes:['启动任务','信息采集','审核'],groups:[{id:'xg1',name:'巡检采集',items:[
+ {id:'x1',name:'门头照',type:'photo',req:true,max:3,desc:'正对门头拍摄'},
+ {id:'x2',name:'机具状态',type:'radio',req:true,options:['正常','故障','停用']},
+ {id:'x3',name:'是否正常营业',type:'radio',req:true,options:['是','否']},
+ {id:'x4',name:'巡检备注',type:'text',req:false}]}]};
+/* 种子迁移：补商户任务 + 非金快照 */
+if(!S.mchSeeded){S.mchSeeded=true;
+ S.tasks.push(
+ {id:'T4',biz:'mchi',status:'new',sub:'',name:'老王餐饮管理有限公司（华强北店）',proj:'商户服务 · POS 装机 7月批',addr:'福田区华强北路 1002 号赛格广场 3 层',dist:'2.8km',remain:'剩 30 小时（下单截止）',urgent:true,note:'新店装机，需商户管理员在场签收',quota:null,contact:{n:'王老板',p:'137****2210'},mch:{no:'M2026-071288',dev:['POS-8821-A','POS-8821-B'],term:'T88217701'},snap:null,shopName:null,shopHist:null,mverified:false,ans:{},ph:{},reps:{},comms:[],appt:null,rej:[]},
+ {id:'T5',biz:'mchx',status:'new',sub:'',name:'幸福西饼食品有限公司（南山旗舰店）',proj:'商户服务 · POS 运维巡检 7月',addr:'南山区海德三道海岸城 122 铺',dist:'1.9km',remain:'最晚提交 明日 18:00',urgent:false,note:'',quota:null,contact:{n:'张店长',p:'136****9902'},mch:{no:'M2025-033107',dev:['POS-5502-C'],term:'T55023309'},snap:{dev:'POS-5502-C · 正常',time:'2026-06-28 15:40',person:'陈小飞',addr:'南山区海德三道海岸城 122 铺'},shopName:null,shopHist:'幸福西饼（海岸城店）',mverified:false,ans:{},ph:{},reps:{},comms:[],appt:null,rej:[]});
+ const nf=S.tasks.filter(t=>t.biz==='nonfin');
+ if(nf[0]&&nf[0].snap===undefined)nf[0].snap={dev:'冰柜 ×2 · 陈列正常',time:'2026-06-30 10:20',person:'黄志强',addr:nf[0].addr};
+ if(nf[1]&&nf[1].snap===undefined)nf[1].snap=null;
+ save()}
+
+/* ═════ 首页：智能排序 + 任务类型筛选 ═════ */
+function typeCat(t){return t.biz==='verify'?'verify':(t.biz==='nonfin'?'nonfin':'mch')}
+function cardsFor(tab){let L;
+ if(tab==='new')L=S.tasks.filter(t=>t.status==='new');
+ else if(tab==='doing')L=S.tasks.filter(t=>t.status==='doing');
+ else L=S.tasks.filter(t=>t.status==='review').sort((a,b)=>(b.sub==='待补录')-(a.sub==='待补录'));
+ const f=S.typeFilter;if(f&&f.length&&f.length<3)L=L.filter(t=>f.includes(typeCat(t)));
+ if(tab==='new')L=[...L].sort((a,b)=>(b.urgent?1:0)-(a.urgent?1:0));
+ if(tab==='doing'){const m=S.doingSort||'smart';
+  if(m==='smart')L=[...L].sort((a,b)=>((bz(b).needAppt?1:0)-(bz(a).needAppt?1:0))||(parseFloat(a.dist)-parseFloat(b.dist)));
+  else if(m==='dist')L=[...L].sort((a,b)=>parseFloat(a.dist)-parseFloat(b.dist));
+  else L=[...L].sort((a,b)=>((a.appt?0:1)-(b.appt?0:1)))}
+ return L}
+function sortbarHTML(){const f=S.typeFilter||[];const active=f.length&&f.length<3;const fl=active?`已筛 ${f.length} 类▾`:'任务类型▾';
+ const tf=`<span onclick="openTypeFilter()" style="${active?'color:var(--orange);font-weight:700':''}">${fl}</span>`;
+ if(S.tab==='new')return`<div class="sortbar"><b>派单时间⇅</b>${tf}<span onclick="toast('demo：默认派单时间排序，加急置顶')">距离⇅</span><span onclick="toast('demo：默认派单时间排序，加急置顶')">截止⇅</span></div>`;
+ if(S.tab==='doing'){const m=S.doingSort||'smart';const c=(k,n)=>m===k?`<b onclick="S.doingSort='${k}';save();render()">${n}</b>`:`<span onclick="S.doingSort='${k}';save();render()">${n}</span>`;
+  return`<div class="sortbar">${c('smart','智能排序（默认）')}${c('appt','预约时间⇅')}${c('dist','距离⇅')}${tf}</div>`}
+ return`<div class="sortbar"><b>待补录置顶</b><span>提交时间⇅</span>${tf}</div>`}
+function homeHTML(){const hasRedo=S.tasks.some(t=>t.sub==='待补录');
+ const tabs=[['new','新任务'],['doing','执行中'],['review','审核中']];
+ const list=cardsFor(S.tab);
+ return`<div class="screen"><div class="apphead"><div class="navrow">
+  <div class="tabs">${tabs.map(([k,n])=>`<button class="tab ${S.tab===k?'on':''}" onclick="S.tab='${k}';save();render()">${n}${k==='review'&&hasRedo?'<span class="rdot"></span>':''}</button>`).join('')}<button class="tab" onclick="openRoute()">路线规划</button></div>
+  <button class="bell" onclick="openStats()">📊</button><button class="bell" onclick="toast('通知中心（占位）')">🔔</button></div></div>
+ ${sortbarHTML()}
+ <div class="scroll">${S.tab==='new'&&typeof grabEntry==='function'?grabEntry():''}<div class="cards">${list.length?list.map(cardHTML).join(''):`<div class="empty"><div class="big">📬</div>暂无任务<br><span style="font-size:12px">可调整筛选，或在右下角 ⚙︎ 重置演示数据</span></div>`}</div></div></div>`}
+function openTypeFilter(){const f=S.typeFilter&&S.typeFilter.length?S.typeFilter:['verify','mch','nonfin'];
+ const chip=(k,n)=>`<button class="chip ${f.includes(k)?'on':''}" onclick="toggleTF('${k}')">${n}</button>`;
+ openSheet(`<div class="shtitle">任务类型筛选（多选）<button class="x" onclick="closeSheet()">✕</button></div>
+ <div class="chips" style="margin-bottom:4px">${chip('verify','见证核实')}${chip('mch','商户服务')}${chip('nonfin','非金核查')}<button class="chip ${f.length===3?'on':''}" onclick="S.typeFilter=null;save();openTypeFilter();render()">全部</button></div>
+ <div class="shbtns"><button class="btn pri" onclick="closeSheet()">完成</button></div>`)}
+function toggleTF(k){let f=S.typeFilter&&S.typeFilter.length?[...S.typeFilter]:['verify','mch','nonfin'];
+ if(f.includes(k)){f=f.filter(x=>x!==k);if(!f.length)f=[k]}else f.push(k);
+ S.typeFilter=f.length===3?null:f;save();openTypeFilter();render()}
+
+/* ═════ 任务详情：双 Tab + 商户专有块 + 上次巡检快照 + 新任务采集预览 ═════ */
+function openDetail(id){S.cur=id;S.screen='detail';S.detTab='info';save();render()}
+function mchHTML(t){if(!t.mch)return'';return`<div class="sect">商户专有信息（配置驱动字段块）</div><div class="infocard">
+ <div class="irow"><span class="k">商户编号</span><span class="v">${t.mch.no}</span></div>
+ <div class="irow"><span class="k">机具号</span><span class="v">${t.mch.dev.join('、')}</span></div>
+ <div class="irow"><span class="k">终端号</span><span class="v">${t.mch.term}</span></div></div>`}
+function snapHTML(t){const s=t.snap;
+ return`<div class="sect">上次巡检快照（只读 · 取商户主档最新一次）</div>
+ ${s?`<div class="infocard">
+ <div class="irow"><span class="k">门头照</span><span class="v"><span class="snapthumb" onclick="toast('历史门头照大图（demo 占位）')">🏪</span></span></div>
+ <div class="irow"><span class="k">设备信息</span><span class="v">${esc(s.dev)}</span></div>
+ <div class="irow"><span class="k">巡检时间</span><span class="v">${s.time}</span></div>
+ <div class="irow"><span class="k">巡检人</span><span class="v">${esc(s.person)}</span></div>
+ <div class="irow"><span class="k">作业地址</span><span class="v">${esc(s.addr)}</span></div></div>`
+ :`<div class="apptcard">暂无历史巡检记录（首次作业 / 全新商户），完成本单后将写入主档</div>`}`}
+function previewHTML(t){return`<div class="sect">采集内容（只读预览 · 接单后进入采集）</div>`+bz(t).groups.map(g=>`<div class="infocard" style="margin-bottom:8px"><div class="irow"><span class="k"><b>${g.name}</b></span><span class="v">${g.repeat?(g.repeat.preset.length+' 台预置 · 可重复'):(g.items.length+' 项')}</span></div>${(g.repeat?g.repeat.sub:g.items).map(it=>`<div class="irow"><span class="k">${it.req?'<span class="req">*</span> ':''}${esc(it.name)}</span><span class="v">${it.type==='photo'?'拍照':it.type==='radio'?'单选':it.type==='number'?'数值':'文本'}</span></div>`).join('')}</div>`).join('')}
+function collectInfoHTML(t){ensureReps(t);return bz(t).groups.map(g=>{const s=groupStat(t,g);
+ const items=g.repeat?(t.reps[g.id]||[]).map(i=>`<div class="irow"><span class="k">${esc(i.name)}</span><span class="v" style="color:${i.nf?'var(--orange)':instDone(g,i,t)?'var(--green)':'var(--sub)'}">${i.nf?'未找到':instDone(g,i,t)?'✓ 已完成':'未完成'}</span></div>`).join('')
+  :g.items.map(it=>`<div class="irow"><span class="k">${it.req?'<span class="req">*</span> ':''}${esc(it.name)}${t.rej.includes(it.id)&&t.sub==='待补录'?'<span class="rejtip">被驳回</span>':''}</span><span class="v" style="color:${itemDone(t,it)?'var(--green)':'var(--sub)'}">${itemDone(t,it)?'✓ 已完成':'未完成'}</span></div>`).join('');
+ return`<div class="sect">${g.name} · ${s.done}/${s.total}</div><div class="infocard">${items}</div>`}).join('')}
+function detailHTML(){const t=task(S.cur);const B=bz(t);const ni=nodeIdx(t);const isNew=t.status==='new';const tab=S.detTab||'info';
+ const info=`<div class="sect">任务信息</div>
+  <div class="infocard">
+   <div class="irow"><span class="k">企业/门店</span><span class="v"><b>${esc(t.name)}</b></span></div>
+   <div class="irow"><span class="k">项目</span><span class="v">${esc(t.proj)}</span></div>
+   <div class="irow"><span class="k">剩余时间</span><span class="v" style="color:var(--orange);font-weight:700">${t.remain}</span></div>
+   <div class="irow"><span class="k">地址</span><span class="v link" onclick="toast('唤起导航（demo 模拟）')">${esc(t.addr)} ›</span></div>
+   ${t.quota?`<div class="irow"><span class="k">配额</span><span class="v">${t.quota}（提交时校验）</span></div>`:''}
+   ${t.contact&&!isNew?`<div class="irow"><span class="k">联系人</span><span class="v">${t.contact.n} · ${t.contact.p} <span class="link" onclick="dial('${t.id}')">📞</span></span></div>`:''}
+   ${t.note?`<div class="irow"><span class="k">备注</span><span class="v" style="color:#8A5A00">${esc(t.note)}</span></div>`:''}
+  </div>
+  ${mchHTML(t)}
+  ${t.biz!=='verify'?snapHTML(t):''}
+  ${B.needAppt&&!isNew?`<div class="sect">预约信息（只显最新）</div><div class="apptcard">${t.appt?`⏰ ${t.appt.time}<br>📍 ${esc(t.appt.addr)}`:'暂无预约记录，点击下方「去预约」登记'}</div>`:''}
+  ${t.comms.length?`<div class="sect">作业沟通记录（只增不改）</div><div class="tl">${t.comms.map(c=>`<div class="ev"><b>${esc(c.txt)}</b><br><span class="t">${c.at}</span></div>`).join('')}</div>`:''}
+  ${t.status==='review'?`<div class="sect">采集结果</div><div class="infocard"><div class="irow"><span class="k">已采集</span><span class="v">${totalStat(t).done}/${totalStat(t).total} 项${t.rej.length?` · <span style="color:var(--red);font-weight:700">${t.rej.length} 项被驳回</span>`:''}</span></div></div>`:''}`;
+ return`<div class="screen"><div class="dethead"><button class="back" onclick="goHome()">‹</button><div class="dettitle">任务详情</div>${stateTag(t)}</div>
+ ${isNew?'':`<div class="dettabs"><button class="dtab ${tab==='info'?'on':''}" onclick="S.detTab='info';save();render()">任务信息</button><button class="dtab ${tab==='collect'?'on':''}" onclick="S.detTab='collect';save();render()">采集信息</button></div>`}
+ <div class="scroll">
+  <div class="steps">${B.nodes.map((n,i)=>`<div class="step ${i<ni?'done':i===ni?'now':''}"><div class="dot"></div>${n}</div>`).join('')}</div>
+  ${isNew?info+previewHTML(t):(tab==='info'?info:collectInfoHTML(t))}
+  <div style="height:16px"></div>
+ </div>
+ <div class="botbar">${t.status==='review'&&t.sub!=='待补录'?`<button class="btn sec" style="flex:1" onclick="S.cur='${t.id}';S.screen='container';S.curGroup=bz(task('${t.id}')).groups[0].id;save();render()">查看采集内容（只读）</button>`:
+  `${t.status==='doing'?`<button class="btn sec" onclick="openReturn('${t.id}')">退回</button><button class="btn sec" onclick="openTransfer('${t.id}')">转派</button>`:''}<button class="btn pri ${t.sub==='待补录'?'red':''}" onclick="mainAction('${t.id}')">${mainLabel(t)}</button>`}</div></div>`}
+
+/* ═════ 商户信息核对卡（容器顶部常驻 · 默认折叠只读） ═════ */
+let MC={open:false};
+function mcardHTML(t){const st=t.shopName?'edit':(t.shopHist?'hist':'new');
+ if(!MC.open)return`<div class="mcard"><div class="mr1"><b>商户信息</b><button class="mlink" onclick="MC.open=true;render()">信息有变？核对更新</button><span class="mtop" onclick="toast('历史门头照（demo 占位）')">门头 · ${t.snap?'2 个月前':'无'}</span></div>
+  <div class="mr2">📍 ${esc(t.addr)}<span class="mtag ${t.mverified?'ok':''}">${t.mverified?'✓ 已核实':'待核实'}</span></div>
+  ${t.shopName?`<div class="mr2">🏪 ${esc(t.shopName)}<span class="mtag ok">已更新</span></div>`:''}</div>`;
+ return`<div class="mcard"><div class="mr1"><b>商户信息 · 核对更新</b><span class="mtop">仅人工保存写入留痕</span></div>
+ <div class="mblk"><div class="bt">门店名称（招牌名 · 主显示名）${st==='hist'?'<span class="histtag">沿用历史 · 陈小飞 · 06-28 可修改</span>':st==='new'?'<span class="histtag">全新店 · 待补名称</span>':''}</div>
+ <input class="tin" id="mc_name" placeholder="请补充门店名称（可跳过）" value="${esc(t.shopName||t.shopHist||'')}">
+ <div style="font-size:11px;color:#B9B6B1;margin-top:4px">注册名称（营业执照 · 只读）：${esc(t.name)}</div></div>
+ <div class="mblk"><div class="bt">作业地址</div>
+ <div class="locbox">📡 定位建议：${esc(t.addr)}<button class="mlink" onclick="$('mc_addr').value='${esc(t.addr)}';toast('已使用定位建议')">使用</button></div>
+ <input class="tin" id="mc_dist" value="广东省 深圳市 南山区" style="margin-bottom:8px">
+ <input class="tin" id="mc_addr" value="${esc(t.addr)}">
+ <button class="mlink" style="margin-top:6px" onclick="toast('全屏地图选点（demo 模拟）')">🗺 地图选点</button></div>
+ <div class="mbtns"><button class="btn" style="flex:1" onclick="MC.open=false;render()">暂不更新</button><button class="btn pri" style="flex:1" onclick="saveMcard()">保存更新</button></div></div>`}
+function saveMcard(){const t=task(S.cur);const n=$('mc_name').value.trim().replace(/\s+/g,' ');const a=$('mc_addr').value.trim();
+ t.mlog=t.mlog||[];
+ if(n&&n!==(t.shopName||'')){t.mlog.push({f:'门店名称',old:t.shopName||t.shopHist||'（空）',at:now()});t.shopName=n}
+ if(a&&a!==t.addr){t.mlog.push({f:'作业地址',old:t.addr,at:now()});t.addr=a}
+ t.mverified=true;MC.open=false;save();render();toast('已保存更新 · 旧值留痕（'+t.mlog.length+' 条轨迹）')}
+
+/* ═════ 作业统计升级：时间 × 任务类型 × 完成单量 ═════ */
+let STT='day';
+function openStats(){const base={day:{verify:0,mch:0,nonfin:0},week:{verify:3,mch:4,nonfin:9},month:{verify:11,mch:15,nonfin:34}}[STT];
+ const sb=S.subBiz||{};const cur={verify:(sb.verify||0)+base.verify,mch:(sb.mchi||0)+(sb.mchx||0)+base.mch,nonfin:(sb.nonfin||0)+base.nonfin};
+ const tot=cur.verify+cur.mch+cur.nonfin;
+ const doing=S.tasks.filter(t=>t.status==='doing').length,review=S.tasks.filter(t=>t.status==='review').length;
+ const tb=(k,n)=>`<button class="mtab ${STT===k?'on':''}" style="height:30px" onclick="STT='${k}';openStats()">${n}</button>`;
+ openSheet(`<div class="shtitle">📊 作业统计<button class="x" onclick="closeSheet()">✕</button></div>
+ <div style="display:flex;gap:8px;margin-bottom:10px">${tb('day','今日')}${tb('week','本周')}${tb('month','本月')}</div>
+ <div class="infocard" style="margin-bottom:10px">
+ <div class="irow"><span class="k">见证核实</span><span class="v"><b>${cur.verify}</b> 单</span></div>
+ <div class="irow"><span class="k">商户服务</span><span class="v"><b>${cur.mch}</b> 单</span></div>
+ <div class="irow"><span class="k">非金核查</span><span class="v"><b>${cur.nonfin}</b> 单</span></div>
+ <div class="irow"><span class="k"><b>合计（完成=提交成功）</b></span><span class="v"><b style="color:var(--green);font-size:16px">${tot}</b> 单</span></div></div>
+ <div class="statgrid"><div class="statcell">在手 · 执行中<b style="color:var(--blue)">${doing}</b></div><div class="statcell">审核中<b style="color:var(--orange)">${review}</b></div></div>
+ <div style="font-size:11.5px;color:#B9B6B1;line-height:1.6">今日=真实操作计数；本周/本月含 demo 预置基数。收入指标暂弱化（待绩效体系落地）。</div>`)}
+render();
+</script>
+<style>
+/* ══ P3：非金 · 元气森林真实场景 ══ */
+.lnavadd{display:inline-block;margin-left:5px;padding:0 5px;border-radius:6px;background:#EAF3FC;color:var(--blue);font-weight:800;font-size:13px;line-height:18px}
+.lnav.on .lnavadd{background:rgba(255,255,255,.25);color:#fff}
+.recpill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:22px;padding:9px 14px;background:var(--soft);font-size:13px;font-weight:600;color:var(--ink)}
+.recpill.on{background:#FDECEA;border-color:#F2CFCB;color:#B3261E}
+.recpill.done{background:#EBF6EE;border-color:#CDE8D4;color:#1F7A3D}
+.recdot{width:8px;height:8px;border-radius:50%;background:#E5484D;animation:p3blink 1s infinite}
+@keyframes p3blink{50%{opacity:.15}}
+.skuhead{font-size:11.5px;color:#8A5A00;background:#FBF3E9;border-radius:8px;padding:6px 10px;margin:10px 0 6px;font-weight:700}
+</style>
+<script>
+/* ═════ P3：非金业务线（元气森林 68 项真实采集样例） ═════ */
+const FB=['元气森林&外星人','农夫','农夫定制','可口可乐','百事','康师傅','统一','冷风柜','其他品牌'];
+const SKU_G=['280ml气泡水-白桃','280ml气泡水-维C橙','480ml气泡水-白桃','480ml气泡水-夏黑','480ml气泡水-荔枝','480ml气泡水-卡曼橘','480ml气泡水-维C橙','480ml气泡水-维C柠檬','480ml气泡水-冰柠可乐','480ml气泡水-青竹葡萄柚','480ml气泡水-苹果威士忌','480ml气泡水-盐系青梅','2L气泡水-白桃','2L气泡水-可乐','2L气泡水-维C橙','2L气泡水-夏黑'];
+const SKU_E=['500ml外星人电解质水0糖-荔枝海盐','500ml外星人电解质水0糖-白桃','500ml外星人电解质水0糖-青柠','600ml外星人电解质水0糖-荔枝海盐','600ml外星人电解质水0糖-白桃','600ml外星人电解质水0糖-青柠','500ml外星人电解质水低糖-专业版','600ml外星人电解质水低糖-专业版','600ml外星人电解质水低糖-青柠','600ml外星人电解质水低糖-椰子','600ml外星人电解质水低糖-西柚','950ml外星人电解质水-荔枝海盐','950ml外星人电解质水-青柠'];
+const SKU_T=['900ml冰茶-冰爆柠檬','900ml冰茶-葡萄柚绿茶','900ml冰茶-白桃茉莉','900ml冰茶-茉莉绿茶','900ml冰茶-青梅茉莉'];
+const PRICE7=['元气-气泡水','元气-电解质水','元气-乳茶','元气-冰茶','元气-自在水','元气-维C水','维B水'];
+BIZ.nonfin={name:'非金核查',mode:'matrix',needAppt:false,nodes:['启动任务','信息采集','审核'],groups:[
+ {id:'pg_base',name:'基础信息',items:[
+  {id:'b1',name:'作业过程录音',type:'audio',req:1,desc:'全程录音；如门店拒访，需在录音中体现'},
+  {id:'b2',name:'门头照',type:'photo',req:1,max:3,desc:'正对门头，招牌完整入镜'},
+  {id:'b3',name:'门店状态判断',type:'radio',req:1,options:['正常营业','临时闭店','门店拒访','已关店/搬迁']},
+  {id:'b4',name:'门店所在位置地图定位截图',type:'photo',req:1,max:1},
+  {id:'b5',name:'门店编号（重复店验证）',type:'text',req:1,desc:'录入系统门店编号，用于重复门店校验'},
+  {id:'b6',name:'门店整体环境照',type:'photo',req:1,max:3}]},
+ {id:'pg_shelf',name:'货架',minRep:true,repeat:{unit:'货架',tag:'架',preset:['货架 1'],addable:true,sub:[
+  {id:'s1',name:'常温饮料区货架远景照（全景）',type:'photo',req:1,max:3},
+  {id:'s2',name:'元气森林产品货架近景照',type:'photo',req:1,max:3,desc:'排面完整、价签清晰可读'}]},
+  previewNote:'可添加多个货架，每个货架采集全景+近景'},
+ {id:'pg_fridge',name:'冰柜',minRep:true,items:[
+  {id:'fz0',name:'冰柜及冷风柜区域整体环境照',type:'photo',req:1,max:3},
+  {id:'fz1',name:'门店内有哪些品牌冰柜（多选）',type:'multi',req:1,options:FB}],
+  repeat:{unit:'冰柜',tag:'柜',preset:[],addable:true,sub:[
+  {id:'fr0',name:'品牌类型',type:'radio',req:1,options:FB},
+  {id:'fr1',name:'正面照（全景）',type:'photo',req:1,max:2,desc:'柜门关闭、品牌贴纸完整入镜'},
+  {id:'fr2',name:'近景照',type:'photo',req:1,max:3,desc:'柜内陈列清晰可见'},
+  {id:'fr3',name:'元气森林冰柜资产编码',type:'text',req:1,showIfInst:i=>i.ans.fr0==='元气森林&外星人'}]},
+  emptyHint:'勾选上方品牌后自动生成对应冰柜采集卡；也可点左侧「冰柜」页签上的 ＋ 手动新增',
+  previewNote:'按勾选品牌自动生成冰柜采集卡（全景+近景，元气自有柜加采资产编码）'},
+ {id:'pg_sec',name:'二次陈列',minRep:true,showRepIf:t=>t.ans.d1==='是',items:[
+  {id:'d1',name:'是否有二次陈列',type:'radio',req:1,options:['是','否']}],
+  repeat:{unit:'二次陈列点',tag:'陈',preset:[],addable:true,sub:[
+  {id:'c0',name:'陈列类型',type:'radio',req:1,options:['地堆','端架','挂条','收银台','其他']},
+  {id:'c1',name:'二次陈列全景照',type:'photo',req:1,max:2},
+  {id:'c2',name:'二次陈列近景照',type:'photo',req:1,max:2}]},
+  previewNote:'选「是」后出现可重复采集项，可添加多个二次陈列点'},
+ {id:'pg_sku',name:'分销&货龄',items:[
+  {id:'k1',name:'门店是否有元气森林气泡水',type:'radio',req:1,options:['有','无'],sect:'分销核查（答「有」自动展开对应 SKU 货龄项）'},
+  ...SKU_G.map((n,i)=>({id:'kg'+i,name:'【'+n+'】生产日期照',type:'photo',req:0,max:1,showIf:t=>t.ans.k1==='有',sect:i===0?'气泡水 SKU 货龄 · 瓶身/生产日期特写（16）':null})),
+  {id:'k2',name:'门店是否有外星人电解质水',type:'radio',req:1,options:['有','无']},
+  {id:'keqr',name:'【外星人电解质水-红包版】瓶盖二维码',type:'photo',req:0,max:1,showIf:t=>t.ans.k2==='有',sect:'电解质水 SKU 货龄 · 瓶身/生产日期特写（14）'},
+  ...SKU_E.map((n,i)=>({id:'ke'+i,name:'【'+n+'】生产日期照',type:'photo',req:0,max:1,showIf:t=>t.ans.k2==='有'})),
+  {id:'k3',name:'门店是否有900ML冰茶',type:'radio',req:1,options:['有','无']},
+  ...SKU_T.map((n,i)=>({id:'kt'+i,name:'【'+n+'】生产日期照',type:'photo',req:0,max:1,showIf:t=>t.ans.k3==='有',sect:i===0?'冰茶 SKU 货龄 · 瓶身/生产日期特写（5）':null})),
+  {id:'k4',name:'【东鹏特饮】特写照（竞品）',type:'photo',req:0,max:2,sect:'竞品采集'}],
+  previewNote:'分销 3 问 + 最多 35 个 SKU 生产日期特写（按分销答案联动展开）'},
+ {id:'pg_price',name:'售价',items:PRICE7.map((n,i)=>({id:'pr'+i,name:n+'-终端最低零售价（元）',type:'number',req:i===0?1:0,desc:i===0?'取门店该品类最低售价':'门店无此品类可不填',sect:i===0?'终端最低零售价（7 品类）':null}))},
+ {id:'pg_note',name:'备注',items:[{id:'z1',name:'特殊情况备注说明',type:'text',req:0,desc:'缺货/拒拍/异常情况等在此说明'}]}
+]};
+/* 迁移：老非金任务清空旧口径采集数据 */
+if(!S.p3Reset){S.p3Reset=true;S.tasks.forEach(t=>{if(t.biz==='nonfin'){t.ans={};t.ph={};t.reps={};t.rej=[];t.proj='非金 · 元气森林7月终端核查';if(t.status==='review')t.sub='待审核'}});save()}
+
+/* ═════ 引擎扩展：条件显隐 / 混合分组 / 多选 / 录音 ═════ */
+function p3vis(t,it){return !it.showIf||it.showIf(t)}
+function repA(t,g){return !g.showRepIf||g.showRepIf(t)}
+function ensureReps(t){const B=bz(t);B.groups.forEach(g=>{if(g.repeat&&!t.reps[g.id]){t.reps[g.id]=(g.repeat.preset||[]).map((nm,i)=>({id:g.id+'_i'+i,name:nm,preset:true,nf:false,ans:{},ph:{}}))}})}
+function itemDone(t,it,inst){const src=inst||t;if(it.type==='photo')return (src.ph[it.id]||[]).length>0;const a=src.ans[it.id];if(Array.isArray(a))return a.length>0;return a!==undefined&&a!==null&&a!==''}
+function instDone(g,inst,t){if(inst.nf)return true;return g.repeat.sub.filter(s=>!s.showIfInst||s.showIfInst(inst)).every(s=>!s.req||itemDone(t,s,inst))}
+function groupStat(t,g){ensureReps(t);let d=0,n=0;
+ (g.items||[]).filter(it=>p3vis(t,it)).forEach(it=>{n++;if(itemDone(t,it))d++});
+ if(g.repeat&&repA(t,g)){const L=t.reps[g.id]||[];n+=L.length;d+=L.filter(i=>instDone(g,i,t)).length}
+ return{done:d,total:n}}
+function missing(t){const out=[];const redo=t.sub==='待补录';bz(t).groups.forEach(g=>{
+ (g.items||[]).filter(it=>p3vis(t,it)).forEach(it=>{if(it.req&&!itemDone(t,it)&&(!redo||t.rej.includes(it.id)))out.push({g,it,label:g.name+' · '+it.name})});
+ if(g.repeat&&repA(t,g)){const L=t.reps[g.id]||[];
+  if(g.minRep&&!L.length&&!redo)out.push({g,it:{id:g.id,name:g.name},label:g.name+' · 至少添加 1 个'+(g.repeat.unit||'实例')});
+  L.forEach(inst=>{if(inst.nf)return;g.repeat.sub.filter(s=>!s.showIfInst||s.showIfInst(inst)).forEach(s=>{if(s.req&&!itemDone(t,s,inst)&&(!redo||t.rej.includes(g.id)))out.push({g,it:s,inst,label:inst.name+' · '+s.name})})})}});return out}
+let REC={item:null,t0:0};
+function recStart(id){REC={item:id,t0:Date.now()};rerender()}
+function recStop(id){const s=Math.max(6,Math.round((Date.now()-REC.t0)/1000)+34);REC={item:null,t0:0};setAns(id,'录音 00:'+String(Math.min(59,s)).padStart(2,'0')+' · 已保存（模拟）',null,null)}
+function toggleMulti(itemId,opt){const t=task(S.cur);const arr=t.ans[itemId]=(t.ans[itemId]||[]);const i=arr.indexOf(opt);if(i>=0)arr.splice(i,1);else arr.push(opt);
+ if(itemId==='fz1')syncFridge(t);save();rerender()}
+function syncFridge(t){ensureReps(t);const sel=t.ans['fz1']||[];const L=t.reps['pg_fridge']||[];
+ sel.forEach(b=>{if(!L.some(i=>i.ans.fr0===b))L.push({id:'pg_fridge_a'+Math.random().toString(36).slice(2,9),name:(b==='冷风柜'?b:b+'冰柜'),preset:false,auto:true,nf:false,ans:{fr0:b},ph:{}})});
+ t.reps['pg_fridge']=L.filter(i=>{if(!i.auto)return true;if(sel.includes(i.ans.fr0))return true;
+  return Object.keys(i.ph||{}).some(k=>(i.ph[k]||[]).length)||Object.keys(i.ans).length>1})}
+function setAns(itemId,val,gid,iid){const t=task(S.cur);const src=(gid&&iid)?findInst(gid,iid):t;src.ans[itemId]=val;
+ if(itemId==='fr0'&&gid&&iid){src.name=(val==='冷风柜'?val:val+'冰柜')}
+ save();if(gid&&iid&&INST.open){renderInst(gid,iid)}else{rerender()}}
+function itemHTML(t,g,it,inst){const src=inst||t;const done=itemDone(t,it,inst);const rej=t.rej.includes(it.id)&&t.sub==='待补录';
+ const canEdit=inst?editable(t,g.id):editable(t,it.id);
+ const instArg=inst?`'${g.id}','${inst.id}'`:`null,null`;
+ let body='';
+ if(it.type==='radio'){body=`<div class="chips">${it.options.map(o=>`<button class="chip ${src.ans[it.id]===o?'on':''}" onclick="setAns('${it.id}','${o}',${instArg})">${o}</button>`).join('')}</div>`}
+ else if(it.type==='multi'){const arr=src.ans[it.id]||[];
+  body=`<div class="chips">${it.options.map(o=>`<button class="chip ${arr.includes(o)?'on':''}" onclick="toggleMulti('${it.id}','${o}')">${o}</button>`).join('')}</div><div class="phcount">已选 ${arr.length} 个品牌 · 勾选后自动生成对应冰柜采集卡</div>`}
+ else if(it.type==='audio'){const a=src.ans[it.id];
+  body=a?`<div class="recpill done">🎙 ${esc(a)}<button class="mlink" style="margin-left:8px" onclick="setAns('${it.id}',null,${instArg})">重录</button></div>`
+  :(REC.item===it.id?`<button class="recpill on" onclick="recStop('${it.id}')"><span class="recdot"></span>录音中… 点击结束</button>`
+  :`<button class="recpill" onclick="recStart('${it.id}')">🎙 开始录音（demo 模拟）</button>`)}
+ else if(it.type==='number'){body=`<input class="tin" type="number" inputmode="decimal" placeholder="请输入数值" value="${src.ans[it.id]??''}" onchange="setAns('${it.id}',this.value,${instArg})">`}
+ else if(it.type==='text'){body=`<textarea class="tin" placeholder="请输入" onchange="setAns('${it.id}',this.value,${instArg})">${esc(src.ans[it.id]??'')}</textarea>`}
+ else if(it.type==='photo'){const arr=src.ph[it.id]||[];
+  body=`${it.desc?`<div class="exbox" onclick="toast('示例大图（demo 占位，真实环境为参考拍摄示例）')">🖼 示例图 · 点击放大</div>`:''}
+  <div class="photorow">${arr.map((p,i)=>`<div class="thumbwrap"><img class="thumb" src="${p}"><button class="thumbdel" onclick="delPhoto('${it.id}',${i},${instArg})">✕</button></div>`).join('')}
+  ${arr.length<it.max?`<button class="addph" onclick="takePhoto('${it.id}',${instArg},1)"><span class="ic">📷</span>拍照</button><button class="addph" onclick="takePhoto('${it.id}',${instArg},0)"><span class="ic">⚡</span>模拟</button>`:''}</div>
+  <div class="phcount">${arr.length}/${it.max} 张${arr.length>=it.max?' · 已达上限':''}</div>`}
+ return (it.sect?`<div class="skuhead">${it.sect}</div>`:'')+`<div class="item ${rej?'rej':''} ${canEdit?'':'lock'}" id="it_${inst?inst.id+'_':''}${it.id}">
+  <div class="ihead"><span class="stdot ${rej?'rej':done?'ok':''}"></span>${it.req?'<span class="req">*</span>':''}${esc(it.name)}${rej?'<span class="rejtip">被驳回 · 请重新采集</span>':''}</div>
+  ${it.desc&&it.type!=='photo'?`<div class="idesc">${esc(it.desc)}</div>`:''}
+  ${body}</div>`}
+function repeatHTML(t,g){ensureReps(t);const L=t.reps[g.id]||[];const canEdit=editable(t,g.id);
+ const head=(g.items||[]).filter(it=>p3vis(t,it)).map(it=>itemHTML(t,g,it)).join('');
+ if(!repA(t,g))return head;
+ const unit=(g.repeat&&g.repeat.unit)||'实例';
+ return head+`<div class="item ${canEdit?'':'lock'}" id="it_${g.id}">
+  <div class="ihead"><span class="stdot ${L.length&&L.every(i=>instDone(g,i,t))?'ok':''}"></span>${esc(g.name)}可重复采集（${L.length} 个${unit}）</div>
+  ${L.length?L.map(inst=>{const subv=g.repeat.sub.filter(s=>!s.showIfInst||s.showIfInst(inst));return`<div class="instrow" onclick="openInst('${g.id}','${inst.id}')"><span class="stdot ${inst.nf?'':instDone(g,inst,t)?'ok':''}" style="${inst.nf?'background:var(--orange)':''}"></span>${esc(inst.name)}<span class="st ${inst.nf?'nf':instDone(g,inst,t)?'ok':''}">${inst.nf?'未找到':instDone(g,inst,t)?'已完成':subv.filter(s=>itemDone(t,s,inst)).length+'/'+subv.length}</span><span class="arr">›</span></div>`}).join(''):`<div class="idesc" style="padding:4px 2px">${g.emptyHint||('点左侧「'+g.name+'」页签上的 ＋ 新增'+unit)}</div>`}</div>`}
+function containerHTML(){const t=task(S.cur);const B=bz(t);ensureReps(t);const st=totalStat(t);
+ const readonly=t.status==='review'&&t.sub!=='待补录';const redo=t.sub==='待补录';
+ let body='';
+ if(B.mode==='matrix'){const cg=B.groups.find(g=>g.id===S.curGroup)||B.groups[0];
+  body=`<div class="conbody"><div class="leftnav">${B.groups.map(g=>{const s=groupStat(t,g);const add=g.repeat&&g.repeat.addable&&!readonly;return`<button class="lnav ${g.id===cg.id?'on':''}" onclick="S.curGroup='${g.id}';save();render()">${g.name}${add?`<span class="lnavadd" onclick="event.stopPropagation();tabAdd('${g.id}')">＋</span>`:''}<span class="xy ${s.done===s.total&&s.total>0?'ok':''}">${s.done===s.total&&s.total>0?'✓ ':''}${s.done}/${s.total}</span></button>`}).join('')}</div>
+  <div class="itemlist" id="ilist">${cg.repeat?repeatHTML(t,cg):cg.items.filter(it=>p3vis(t,it)).map(it=>itemHTML(t,cg,it)).join('')}<div style="height:8px"></div></div></div>`}
+ else{body=`<div class="conbody"><div class="itemlist" id="ilist">${B.groups.map(g=>{const s=groupStat(t,g);return`<div class="seghead" id="seg_${g.id}">${g.name}<span class="xy ${s.done===s.total?'ok':''}">${s.done===s.total?'✓ 已完成':s.done+'/'+s.total}</span></div>`+(g.repeat?repeatHTML(t,g):g.items.filter(it=>p3vis(t,it)).map(it=>itemHTML(t,g,it)).join(''))}).join('')}<div style="height:8px"></div></div></div>`}
+ return`<div class="screen"><div class="conhead">
+  <div class="conh1"><button class="back" onclick="exitContainer()">‹</button><div class="dettitle">${esc(t.name)}</div><button class="anscard" onclick="openAnswerCard()">答题卡</button></div>
+  <div class="conh2"><span>${esc(t.proj)}</span><span class="prog" style="margin-left:auto">已完成 ${st.done}/${st.total}</span></div></div>
+ ${redo?`<div class="redobanner">⚠︎ 补录模式：仅被驳回采集项可修改，其余只读</div>`:''}
+ ${readonly?`<div class="redobanner" style="background:var(--fill);color:var(--sub);border-color:var(--line)">已提交 · 只读查看</div>`:''}
+ ${typeof mcardHTML==="function"?mcardHTML(t):""}
+ ${body}
+ <div class="botbar">${readonly?`<button class="btn pri" style="flex:1" onclick="exitContainer()">返回</button>`:`<span style="font-size:11.5px;color:#B9B6B1">自动暂存<br>已开启</span><button class="btn pri ${redo?'red':''}" onclick="trySubmit()">${redo?'重新提交（仅补驳回项）':'提交'}</button>`}</div></div>`}
+function tabAdd(gid){const t=task(S.cur);const g=bz(t).groups.find(x=>x.id===gid);S.curGroup=gid;save();
+ if(g.showRepIf&&!g.showRepIf(t)){render();toast('请先在本页选择「'+g.items[0].name+' = 是」');return}
+ if(!editable(t,gid)){render();toast('当前状态不可编辑');return}
+ addInst(gid)}
+function addInst(gid){const t=task(S.cur);ensureReps(t);const g=bz(t).groups.find(x=>x.id===gid);const L=t.reps[gid];const unit=(g.repeat&&g.repeat.unit)||'实例';
+ L.push({id:gid+'_x'+Date.now(),name:unit+' '+(L.length+1)+'（新增）',preset:false,nf:false,ans:{},ph:{}});save();render();
+ openInst(gid,L[L.length-1].id)}
+function renderInst(gid,iid){const t=task(S.cur);const g=bz(t).groups.find(x=>x.id===gid);const inst=findInst(gid,iid);
+ const canEdit=editable(t,gid);
+ const subs=g.repeat.sub.filter(s=>!s.showIfInst||s.showIfInst(inst));
+ openSheet(`<div class="shtitle">${esc(inst.name)}<button class="x" onclick="closeInst()">∨ 收起</button></div>
+ ${inst.nf?`<div class="redobanner" style="border-radius:8px">已标记「未找到/不适用」，不计入必填</div>`:''}
+ ${subs.map(s=>itemHTML(t,g,s,inst)).join('')}
+ <div class="shbtns">${canEdit?`<button class="btn" onclick="toggleNF('${gid}','${iid}')">${inst.nf?'取消未找到':'标记未找到'}</button>${inst.preset?'':`<button class="btn ghost-red" onclick="delInst('${gid}','${iid}')">删除</button>`}`:''}
+ <button class="btn pri" onclick="closeInst()">完成（自动暂存）</button></div>`,true)}
+function openAnswerCard(){const t=task(S.cur);const B=bz(t);
+ openSheet(`<div class="shtitle">答题卡 · 已完成 ${totalStat(t).done}/${totalStat(t).total}<button class="x" onclick="closeSheet()">✕</button></div>
+ ${B.groups.map(g=>{const s=groupStat(t,g);let dots='';
+  dots+=(g.items||[]).filter(it=>p3vis(t,it)).map((it,i)=>`<button class="ansdot ${t.rej.includes(it.id)&&t.sub==='待补录'?'rej':itemDone(t,it)?'ok':''}" onclick="jumpTo('${g.id}','${it.id}')">${i+1}</button>`).join('');
+  if(g.repeat&&repA(t,g))dots+=(t.reps[g.id]||[]).map((inst,i)=>`<button class="ansdot ${inst.nf?'':instDone(g,inst,t)?'ok':''}" onclick="jumpTo('${g.id}',null)">${(g.repeat.tag||'柜')+(i+1)}</button>`).join('');
+  return`<div class="anssec">${g.name} · ${s.done}/${s.total}</div><div class="ansgrid">${dots||'—'}</div>`}).join('')}`)}
+function collectInfoHTML(t){ensureReps(t);return bz(t).groups.map(g=>{const s=groupStat(t,g);
+ let rows=(g.items||[]).filter(it=>p3vis(t,it)).map(it=>`<div class="irow"><span class="k">${it.req?'<span class="req">*</span> ':''}${esc(it.name)}${t.rej.includes(it.id)&&t.sub==='待补录'?'<span class="rejtip">被驳回</span>':''}</span><span class="v" style="color:${itemDone(t,it)?'var(--green)':'var(--sub)'}">${itemDone(t,it)?'✓ 已完成':'未完成'}</span></div>`).join('');
+ if(g.repeat&&repA(t,g))rows+=(t.reps[g.id]||[]).map(i=>`<div class="irow"><span class="k">${esc(i.name)}</span><span class="v" style="color:${i.nf?'var(--orange)':instDone(g,i,t)?'var(--green)':'var(--sub)'}">${i.nf?'未找到':instDone(g,i,t)?'✓ 已完成':'未完成'}</span></div>`).join('');
+ return`<div class="sect">${g.name} · ${s.done}/${s.total}</div><div class="infocard">${rows||'<div class="irow"><span class="k">（按前置答案联动展开）</span><span class="v"></span></div>'}</div>`}).join('')}
+function previewHTML(t){return`<div class="sect">采集内容（只读预览 · 接单后进入采集）</div>`+bz(t).groups.map(g=>{
+ const items=(g.items||[]).filter(it=>!it.showIf);
+ return`<div class="infocard" style="margin-bottom:8px"><div class="irow"><span class="k"><b>${g.name}</b></span><span class="v">${g.repeat?'可重复':items.length+' 项'}</span></div>
+ ${items.map(it=>`<div class="irow"><span class="k">${it.req?'<span class="req">*</span> ':''}${esc(it.name)}</span><span class="v">${it.type==='photo'?'拍照':it.type==='radio'?'单选':it.type==='multi'?'多选':it.type==='audio'?'录音':it.type==='number'?'数值':'文本'}</span></div>`).join('')}
+ ${g.repeat?g.repeat.sub.filter(s=>!s.showIfInst).map(s=>`<div class="irow"><span class="k">${s.req?'<span class="req">*</span> ':''}${esc(s.name)}</span><span class="v">每${g.repeat.unit||'实例'}</span></div>`).join(''):''}
+ ${g.previewNote?`<div class="irow"><span class="k" style="color:#8A5A00">${g.previewNote}</span><span class="v"></span></div>`:''}</div>`}).join('')}
+function dbgFill(){const t=S.tasks.find(x=>x.id===S.cur&&x.status==='doing')||S.tasks.find(x=>x.sub==='采集中')||S.tasks.find(x=>x.sub==='待补录');
+ if(!t){toast('没有正在采集的任务（先点去采集）');return}
+ S.cur=t.id;ensureReps(t);
+ const fill=(src,it)=>{if(itemDone(t,it,src===t?null:src))return;
+  if(it.type==='photo'){src.ph[it.id]=[mockPhoto(it.id)]}
+  else if(it.type==='radio'){src.ans[it.id]=it.options[0]}
+  else if(it.type==='multi'){src.ans[it.id]=[it.options[0],it.options[3]]}
+  else if(it.type==='audio'){src.ans[it.id]='录音 00:47 · 已保存（模拟）'}
+  else if(it.type==='number'){src.ans[it.id]=String((Math.random()*6+3).toFixed(1))}
+  else{src.ans[it.id]='（调试自动填充）现场情况正常'}};
+ const redo=t.sub==='待补录';
+ bz(t).groups.forEach(g=>{(g.items||[]).filter(it=>p3vis(t,it)).forEach(it=>{if(redo&&!t.rej.includes(it.id))return;if(it.req)fill(t,it)})});
+ if(t.ans.fz1)syncFridge(t);
+ bz(t).groups.forEach(g=>{if(!g.repeat||!repA(t,g))return;
+  if(g.minRep&&!(t.reps[g.id]||[]).length&&!redo){t.reps[g.id].push({id:g.id+'_x'+Date.now(),name:(g.repeat.unit||'实例')+' 1（新增）',preset:false,nf:false,ans:{},ph:{}})}
+  (t.reps[g.id]||[]).forEach(inst=>{if(inst.nf)return;if(redo&&!t.rej.includes(g.id))return;
+   g.repeat.sub.filter(s=>!s.showIfInst||s.showIfInst(inst)).forEach(s=>{if(s.req)fill(inst,s)})})});
+ save();closeSheet();if(S.screen!=='container'){S.screen='container';S.curGroup=bz(t).groups[0].id}render();toast('已自动填完，可直接提交')}
 render();
 </script>
 </body>
