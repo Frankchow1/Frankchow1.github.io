@@ -948,5 +948,89 @@ function dbgFill(){const t=S.tasks.find(x=>x.id===S.cur&&x.status==='doing')||S.
  save();closeSheet();if(S.screen!=='container'){S.screen='container';S.curGroup=bz(t).groups[0].id}render();toast('已自动填完，可直接提交')}
 render();
 </script>
+<style>
+/* ══ P4：行内添加（品牌分组 + 列表底部添加） ══ */
+.brandcard{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
+.bchead{padding:11px 12px;font-size:13.5px;font-weight:700;background:var(--soft);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px}
+.bchint{font-size:11px;color:#8A5A00;background:#FBF3E9;padding:7px 12px;border-bottom:1px solid var(--line)}
+.brow{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--line);font-size:13.5px;font-weight:700;cursor:pointer}
+.brow:last-child{border-bottom:0}
+.bcnt{font-size:11px;color:var(--sub);font-weight:500;background:var(--fill);border-radius:8px;padding:1px 7px;white-space:nowrap}
+.bcnt.ok{color:var(--green);background:#EBF6EE}
+.badd{margin-left:auto;width:24px;height:24px;border-radius:50%;border:0;background:var(--blue);color:#fff;font-size:15px;font-weight:800;line-height:24px;text-align:center;flex-shrink:0;padding:0}
+.barr{color:#B9B6B1;font-size:12px;margin-left:8px}
+.instwrap{background:#FCFCFB;border-bottom:1px solid var(--line);padding:2px 12px 2px 22px}
+.instwrap:last-child{border-bottom:0}
+.instwrap .instrow{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px dashed var(--line);font-size:13px;font-weight:600;cursor:pointer}
+.instwrap .instrow:last-child{border-bottom:0}
+.instmain{display:flex;flex-direction:column}
+.isub{font-size:10.5px;color:#B9B6B1;font-weight:400;margin-top:1px}
+.ist{font-size:11px;border-radius:8px;padding:1px 7px;font-weight:700;margin-left:auto;white-space:nowrap}
+.ist.ok{color:var(--green);background:#EBF6EE}
+.ist.no{color:var(--orange);background:#FBF3E9}
+.ist.nf{color:var(--orange);background:#FBF3E9}
+.instwrap .arr{color:#B9B6B1;margin-left:4px}
+.rowdel{border:0;background:none;color:#C9C6C1;font-size:13px;margin-left:2px;padding:4px}
+.addrow{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:13px;font-weight:700;color:var(--blue);background:#FBFDFF;cursor:pointer}
+</style>
+<script>
+/* ═════ P4：可重复采集改为行内添加 ═════ */
+const P4N={'元气森林&外星人':'元气冰柜','农夫':'农夫冰柜','农夫定制':'农夫定制冰柜','可口可乐':'可口可乐冰柜','百事':'百事冰柜','康师傅':'康师傅冰柜','统一':'统一冰柜','冷风柜':'冷风柜','其他品牌':'其他品牌冰柜'};
+const BCLOSE={};
+function bshort(b){return P4N[b]||(b+'冰柜')}
+function bOpen(b,cnt){return BCLOSE[b]===undefined?cnt>0:!BCLOSE[b]}
+function tglBrand(b){const t=task(S.cur);const cnt=(t.reps['pg_fridge']||[]).filter(i=>i.ans.fr0===b).length;if(!cnt)return;BCLOSE[b]=bOpen(b,cnt);rerender()}
+function hasData(i){return Object.keys(i.ph||{}).some(k=>(i.ph[k]||[]).length)||Object.keys(i.ans).length>1}
+function mkFridge(b,L){const n=L.filter(i=>i.ans.fr0===b).length+1;return{id:'pg_fridge_a'+Math.random().toString(36).slice(2,9),name:bshort(b)+' '+n,preset:false,auto:true,nf:false,ans:{fr0:b},ph:{}}}
+function syncFridge(t){ensureReps(t);const sel=t.ans['fz1']||[];const L=t.reps['pg_fridge']||[];
+ sel.forEach(b=>{if(!L.some(i=>i.ans.fr0===b))L.push(mkFridge(b,L))});
+ t.reps['pg_fridge']=L.filter(i=>{if(!i.auto)return true;if(sel.includes(i.ans.fr0))return true;return hasData(i)})}
+function addBrand(gid,b){const t=task(S.cur);if(!editable(t,gid)){toast('当前状态不可编辑');return}ensureReps(t);const L=t.reps[gid];
+ const inst=mkFridge(b,L);inst.auto=false;L.push(inst);
+ const arr=t.ans.fz1=(t.ans.fz1||[]);if(!arr.includes(b))arr.push(b);
+ BCLOSE[b]=false;save();render();openInst(gid,inst.id)}
+function addRep(gid){const t=task(S.cur);const g=bz(t).groups.find(x=>x.id===gid);if(!editable(t,gid)){toast('当前状态不可编辑');return}ensureReps(t);
+ if(g.showRepIf&&!g.showRepIf(t)){toast('请先在本页选择「'+g.items[0].name+' = 是」');return}
+ const L=t.reps[gid];const unit=(g.repeat&&g.repeat.unit)||'实例';
+ L.push({id:gid+'_x'+Date.now(),name:unit+' '+(L.length+1)+'（新增）',preset:false,nf:false,ans:{},ph:{}});
+ save();render();openInst(gid,L[L.length-1].id)}
+function rowDel(gid,iid){if(!confirm('删除该采集卡？已采内容将丢失'))return;const t=task(S.cur);
+ t.reps[gid]=(t.reps[gid]||[]).filter(i=>i.id!==iid);save();render()}
+function instRowHTML(t,g,inst,canEdit){const subv=g.repeat.sub.filter(s=>!s.showIfInst||s.showIfInst(inst));const done=instDone(g,inst,t);
+ let sub='';if(g.id==='pg_fridge'&&inst.ans.fr0==='元气森林&外星人')sub=inst.ans.fr3?'资产编码 '+esc(inst.ans.fr3):'资产编码未录入';
+ if(g.id==='pg_sec'&&inst.ans.c0)sub='类型：'+esc(inst.ans.c0);
+ return`<div class="instrow" onclick="openInst('${g.id}','${inst.id}')"><span class="stdot ${inst.nf?'':done?'ok':''}" style="${inst.nf?'background:var(--orange)':''}"></span><div class="instmain">${esc(inst.name)}${sub?`<span class="isub">${sub}</span>`:''}</div><span class="ist ${inst.nf?'nf':done?'ok':'no'}">${inst.nf?'未找到':done?'已完成':subv.filter(s=>itemDone(t,s,inst)).length+'/'+subv.length}</span><span class="arr">›</span>${canEdit&&!inst.preset?`<button class="rowdel" onclick="event.stopPropagation();rowDel('${g.id}','${inst.id}')">✕</button>`:''}</div>`}
+function repeatHTML(t,g){ensureReps(t);const L=t.reps[g.id]||[];const canEdit=editable(t,g.id);
+ const head=(g.items||[]).filter(it=>p3vis(t,it)).map(it=>itemHTML(t,g,it)).join('');
+ if(!repA(t,g))return head;
+ const unit=(g.repeat&&g.repeat.unit)||'实例';
+ if(g.id==='pg_fridge'){
+  const brands=g.repeat.sub.find(s=>s.id==='fr0').options;
+  const allDone=L.length&&L.every(i=>instDone(g,i,t));
+  const rows=brands.map(b=>{const insts=L.filter(i=>i.ans.fr0===b);const open=bOpen(b,insts.length);
+   const bdone=insts.length&&insts.every(i=>instDone(g,i,t));
+   const wait=insts.filter(i=>!instDone(g,i,t)).length;
+   return`<div class="brow" onclick="tglBrand('${b}')"><span class="stdot ${bdone?'ok':''}"></span>${esc(bshort(b))}${insts.length?`<span class="bcnt ${bdone?'ok':''}">${insts.length} 台${bdone?' · 完成':' · '+wait+'待采'}</span>`:''}${canEdit?`<button class="badd" onclick="event.stopPropagation();addBrand('${g.id}','${b}')">＋</button>`:''}${insts.length?`<span class="barr">${open?'⌃':'⌄'}</span>`:''}</div>`+(open&&insts.length?`<div class="instwrap">${insts.map(i=>instRowHTML(t,g,i,canEdit)).join('')}</div>`:'')}).join('');
+  return head+`<div class="brandcard" id="it_${g.id}"><div class="bchead"><span class="stdot ${allDone?'ok':''}"></span>品牌冰柜采集（${L.length} 台）</div><div class="bchint">勾选上方品牌自动生成采集卡；也可点品牌行右侧 ＋ 添加该品牌冰柜；点行展开/收起</div>${rows}</div>`}
+ const allDone=L.length&&L.every(i=>instDone(g,i,t));
+ return head+`<div class="brandcard" id="it_${g.id}"><div class="bchead"><span class="stdot ${allDone?'ok':''}"></span>${esc(g.name)}可重复采集（${L.length} 个${unit}）</div>${L.length?`<div class="instwrap" style="border-bottom:1px solid var(--line)">${L.map(i=>instRowHTML(t,g,i,canEdit)).join('')}</div>`:`<div class="bchint">暂未添加，点下方 ＋ 添加${unit}</div>`}${canEdit?`<div class="addrow" onclick="addRep('${g.id}')"><span class="badd">＋</span>添加${unit}</div>`:''}</div>`}
+function containerHTML(){const t=task(S.cur);const B=bz(t);ensureReps(t);const st=totalStat(t);
+ const readonly=t.status==='review'&&t.sub!=='待补录';const redo=t.sub==='待补录';
+ let body='';
+ if(B.mode==='matrix'){const cg=B.groups.find(g=>g.id===S.curGroup)||B.groups[0];
+  body=`<div class="conbody"><div class="leftnav">${B.groups.map(g=>{const s=groupStat(t,g);return`<button class="lnav ${g.id===cg.id?'on':''}" onclick="S.curGroup='${g.id}';save();render()">${g.name}<span class="xy ${s.done===s.total&&s.total>0?'ok':''}">${s.done===s.total&&s.total>0?'✓ ':''}${s.done}/${s.total}</span></button>`}).join('')}</div>
+  <div class="itemlist" id="ilist">${cg.repeat?repeatHTML(t,cg):cg.items.filter(it=>p3vis(t,it)).map(it=>itemHTML(t,cg,it)).join('')}<div style="height:8px"></div></div></div>`}
+ else{body=`<div class="conbody"><div class="itemlist" id="ilist">${B.groups.map(g=>{const s=groupStat(t,g);return`<div class="seghead" id="seg_${g.id}">${g.name}<span class="xy ${s.done===s.total?'ok':''}">${s.done===s.total?'✓ 已完成':s.done+'/'+s.total}</span></div>`+(g.repeat?repeatHTML(t,g):g.items.filter(it=>p3vis(t,it)).map(it=>itemHTML(t,g,it)).join(''))}).join('')}<div style="height:8px"></div></div></div>`}
+ return`<div class="screen"><div class="conhead">
+  <div class="conh1"><button class="back" onclick="exitContainer()">‹</button><div class="dettitle">${esc(t.name)}</div><button class="anscard" onclick="openAnswerCard()">答题卡</button></div>
+  <div class="conh2"><span>${esc(t.proj)}</span><span class="prog" style="margin-left:auto">已完成 ${st.done}/${st.total}</span></div></div>
+ ${redo?`<div class="redobanner">⚠︎ 补录模式：仅被驳回采集项可修改，其余只读</div>`:''}
+ ${readonly?`<div class="redobanner" style="background:var(--fill);color:var(--sub);border-color:var(--line)">已提交 · 只读查看</div>`:''}
+ ${typeof mcardHTML==="function"?mcardHTML(t):""}
+ ${body}
+ <div class="botbar">${readonly?`<button class="btn pri" style="flex:1" onclick="exitContainer()">返回</button>`:`<span style="font-size:11.5px;color:#B9B6B1">自动暂存<br>已开启</span><button class="btn pri ${redo?'red':''}" onclick="trySubmit()">${redo?'重新提交（仅补驳回项）':'提交'}</button>`}</div></div>`}
+function tabAdd(gid){addRep(gid)}
+render();
+</script>
 </body>
 </html>
